@@ -179,6 +179,20 @@ def build_interface() -> gr.Blocks:
         css="""
         #header-row { align-items: flex-start; }
         #mode-panel { padding-top: 6px; }
+        #mode-panel .label-wrap,
+        #story-panel .label-wrap,
+        #status-box .label-wrap,
+        #action-input .label-wrap {
+            min-height: 28px;
+        }
+        #mode-panel .label-wrap .label-text,
+        #story-panel .label-wrap .label-text,
+        #status-box .label-wrap .label-text,
+        #action-input .label-wrap .label-text {
+            font-size: 14px;
+            line-height: 1.4;
+            font-weight: 600;
+        }
         #layout-root { height: calc(100vh - 240px); }
         #story-panel {
             height: calc(100vh - 240px) !important;

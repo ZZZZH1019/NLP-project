@@ -12,6 +12,7 @@ python app.py
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Tuple
 import gradio as gr
 
@@ -27,6 +28,43 @@ def _remove_blank_lines(text: str) -> str:
     """移除文本中的空白行，避免聊天区出现多余空行。"""
     lines = [line.rstrip() for line in text.splitlines() if line.strip()]
     return "\n".join(lines)
+
+
+def _format_key_section_titles(text: str) -> str:
+    """仅格式化关键标题，避免影响其余文本样式。"""
+    aliases = {
+        "场景": "场景",
+        "可疑线索": "可疑线索",
+        "可执行行动": "可执行行动",
+        "可执行运动": "可执行行动",
+    }
+    out_lines: List[str] = []
+    for line in text.splitlines():
+        leading = len(line) - len(line.lstrip())
+        prefix = line[:leading]
+        stripped = line.strip()
+
+        matched = False
+        for raw_term, normalized_term in aliases.items():
+            pattern = (
+                rf"^([>#\-\s]*)"
+                rf"\*{{0,2}}[\[【(（]?{re.escape(raw_term)}[\]】)）]?\*{{0,2}}"
+                rf"([：:]?)(.*)$"
+            )
+            m = re.match(pattern, stripped)
+            if not m:
+                continue
+            prefix_mark = m.group(1) or ""
+            punct = m.group(2) or ""
+            tail = m.group(3) or ""
+            out_lines.append(f"{prefix}{prefix_mark}**{normalized_term}**{punct}{tail}")
+            matched = True
+            break
+
+        if not matched:
+            out_lines.append(line)
+
+    return "\n".join(out_lines)
 
 
 def start_new_game(mode: str) -> Tuple[List[ChatMessage], List[Tuple[str, str]], str, int, bool]:
@@ -105,6 +143,7 @@ def submit_action(
             max_turns=MAX_NARRATIVE_TURNS,
         )
         ai_reply = _remove_blank_lines(ai_reply)
+        ai_reply = _format_key_section_titles(ai_reply)
     except Exception as exc:  # noqa: BLE001
         ai_reply = (
             "系统提示：当前无法连接剧情引擎，请检查 API Key、网络或配额后重试。\n"
@@ -138,6 +177,8 @@ def build_interface() -> gr.Blocks:
     with gr.Blocks(
         title="StoryWeaver - AI 文字冒险",
         css="""
+        #header-row { align-items: flex-start; }
+        #mode-panel { padding-top: 6px; }
         #layout-root { height: calc(100vh - 240px); }
         #story-panel {
             height: calc(100vh - 240px) !important;
@@ -161,6 +202,27 @@ def build_interface() -> gr.Blocks:
         #story-panel .message {
             white-space: pre-wrap !important;
             word-break: break-word !important;
+        }
+        #story-panel .message p,
+        #story-panel .message ul,
+        #story-panel .message ol,
+        #story-panel .message li {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+        }
+        #story-panel .message .prose,
+        #story-panel .message .prose * {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+            line-height: 1.35 !important;
+        }
+        #story-panel .message .prose ol,
+        #story-panel .message .prose ul {
+            padding-left: 1.1em !important;
+        }
+        #story-panel .message strong {
+            color: #111111;
+            font-weight: 700;
         }
         #right-panel {
             display: flex;
@@ -212,26 +274,29 @@ def build_interface() -> gr.Blocks:
         }
         """,
     ) as demo:
-        gr.Markdown(
-            """
-            # StoryWeaver - AI 文字冒险
-            你将扮演私家侦探 **林深**，调查一宗离奇失踪案。  
-            输入你的行动、提问或推理，推动剧情发展。
-            """
-        )
-        mode_selector = gr.Radio(
-            choices=["自由模式", "叙事模式"],
-            value="自由模式",
-            label="游戏模式",
-            info="自由模式：无回合上限；叙事模式：最多 20 回合并在结尾揭示真相。",
-        )
+        with gr.Row(elem_id="header-row"):
+            with gr.Column(scale=7):
+                gr.Markdown(
+                    """
+                    # StoryWeaver - AI 文字冒险
+                    你将扮演私家侦探 **林深**，调查一宗离奇失踪案。  
+                    输入你的行动、提问或推理，推动剧情发展。
+                    """
+                )
+            with gr.Column(scale=5, elem_id="mode-panel"):
+                mode_selector = gr.Radio(
+                    choices=["自由模式", "叙事模式"],
+                    value="自由模式",
+                    label="游戏模式",
+                    info="自由模式：无回合上限；叙事模式：最多 20 回合并在结尾揭示真相。",
+                )
 
         with gr.Row(equal_height=True, elem_id="layout-root"):
             with gr.Column(scale=7):
                 chatbot = gr.Chatbot(
                     label="剧情内容",
                     elem_id="story-panel",
-                    render_markdown=False,
+                    render_markdown=True,
                 )
 
             with gr.Column(scale=5, elem_id="right-panel"):

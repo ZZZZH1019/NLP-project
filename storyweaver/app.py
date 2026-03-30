@@ -31,7 +31,7 @@ def _remove_blank_lines(text: str) -> str:
 
 
 def _format_key_section_titles(text: str) -> str:
-    """将回复归一为三段结构：场景、可疑线索、可执行行动。"""
+    """将回复归一为三段结构：【场景】【可疑线索】【可执行行动】，标准化格式和编号。"""
     section_aliases = {
         "场景": ["场景", "当前场景", "现场", "情景", "行动结果", "结果反馈"],
         "可疑线索": ["可疑线索", "线索", "关键线索", "证据", "新线索", "技术鉴定失败"],
@@ -72,19 +72,6 @@ def _format_key_section_titles(text: str) -> str:
             continue
 
         normalized_line = stripped
-        if current_section == "可执行行动":
-            circled_map = {
-                "①": "1.",
-                "②": "2. ",
-                "③": "3. ",
-                "④": "4. ",
-                "⑤": "5. ",
-                "⑥": "6. ",
-            }
-            for circled, numbered in circled_map.items():
-                if normalized_line.startswith(circled):
-                    normalized_line = numbered + normalized_line[1:].strip()
-                    break
         buckets[current_section].append(normalized_line)
 
     if not buckets["场景"]:
@@ -92,11 +79,31 @@ def _format_key_section_titles(text: str) -> str:
     if not buckets["可疑线索"]:
         buckets["可疑线索"] = ["暂未发现新增可疑线索。"]
     if not buckets["可执行行动"]:
-        buckets["可执行行动"] = ["1. 继续调查现场细节", "2. 追问关键相关人", "3. 核验已得线索"]
+        buckets["可执行行动"] = ["继续调查现场细节", "追问关键相关人", "核验已得线索"]
+
+    # 处理可疑线索编号（多条时按abc，单条时不加编号）
+    if len(buckets["可疑线索"]) > 1:
+        formatted_clues: List[str] = []
+        for i, clue in enumerate(buckets["可疑线索"]):
+            cleaned = re.sub(r"^[a-zA-Z0-9①-⑥\-\.\)\））、:：\s]+", "", clue).strip()
+            if cleaned:
+                letter = chr(ord("a") + i) if i < 26 else f"a{i + 1}"
+                formatted_clues.append(f"{letter}. {cleaned}")
+        buckets["可疑线索"] = formatted_clues if formatted_clues else buckets["可疑线索"]
+
+    # 处理可执行行动编号（按abc）
+    formatted_actions: List[str] = []
+    for i, action in enumerate(buckets["可执行行动"]):
+        cleaned = re.sub(r"^[a-zA-Z0-9①-⑥\-\.\)\））、:：\s]+", "", action).strip()
+        if cleaned:
+            letter = chr(ord("a") + i) if i < 26 else f"a{i + 1}"
+            formatted_actions.append(f"{letter}. {cleaned}")
+    buckets["可执行行动"] = formatted_actions if formatted_actions else buckets["可执行行动"]
 
     output_lines: List[str] = []
     for section in ["场景", "可疑线索", "可执行行动"]:
-        output_lines.append(f"**{section}**")
+        output_lines.append(f"**[ {section} ]**")
+        output_lines.append("")
         output_lines.extend(buckets[section])
         output_lines.append("")
 

@@ -80,7 +80,7 @@ def start_new_game(mode: str) -> Tuple[List[ChatMessage], List[Tuple[str, str]],
     """
     opening = _remove_blank_lines(generator.opening_scene())
     chat_display: List[ChatMessage] = [
-        {"role": "assistant", "content": f"[系统开场]\n{opening}"}
+        {"role": "assistant", "content": opening}
     ]
     game_history: List[Tuple[str, str]] = []
     if mode == "叙事模式":
@@ -218,7 +218,40 @@ def build_interface() -> gr.Blocks:
             min-height: 0;
             overflow: hidden !important;
         }
+        #story-panel button[aria-label="Share"],
+        #story-panel button[aria-label="Copy"],
+        #story-panel button[aria-label="Copy all"],
+        #story-panel button[aria-label="Delete"],
+        #story-panel button[aria-label="Clear"],
+        #story-panel button[aria-label="分享"],
+        #story-panel button[aria-label="复制"],
+        #story-panel button[aria-label="复制全部"],
+        #story-panel button[aria-label="删除"],
+        #story-panel button[aria-label="清空"],
+        #story-panel button[title="Share"],
+        #story-panel button[title="Copy"],
+        #story-panel button[title="Copy all"],
+        #story-panel button[title="Delete"],
+        #story-panel button[title="Clear"],
+        #story-panel button[title="分享"],
+        #story-panel button[title="复制"],
+        #story-panel button[title="复制全部"],
+        #story-panel button[title="删除"],
+        #story-panel button[title="清空"],
+        #story-panel .icon-buttons,
+        #story-panel .button-row,
+        #story-panel .button-panel,
+        #story-panel .chatbot-buttons {
+            display: none !important;
+        }
         #story-panel .label-wrap {
+            display: none !important;
+        }
+        #story-panel > header,
+        #story-panel .panel-header,
+        #story-panel .head,
+        #story-panel .toolbar,
+        #story-panel .top-panel {
             display: none !important;
         }
         #story-panel .wrap {
@@ -332,6 +365,8 @@ def build_interface() -> gr.Blocks:
                 chatbot = gr.Chatbot(
                     label=None,
                     show_label=False,
+                    container=False,
+                    buttons=[],
                     elem_id="story-panel",
                     render_markdown=True,
                 )

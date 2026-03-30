@@ -31,40 +31,76 @@ def _remove_blank_lines(text: str) -> str:
 
 
 def _format_key_section_titles(text: str) -> str:
-    """仅格式化关键标题，避免影响其余文本样式。"""
-    aliases = {
-        "场景": "场景",
-        "可疑线索": "可疑线索",
-        "可执行行动": "可执行行动",
-        "可执行运动": "可执行行动",
+    """将回复归一为三段结构：场景、可疑线索、可执行行动。"""
+    section_aliases = {
+        "场景": ["场景", "当前场景", "现场", "情景", "行动结果", "结果反馈"],
+        "可疑线索": ["可疑线索", "线索", "关键线索", "证据", "新线索", "技术鉴定失败"],
+        "可执行行动": ["可执行行动", "可执行运动", "行动建议", "行动选项", "建议行动", "下一步行动"],
     }
-    out_lines: List[str] = []
-    for line in text.splitlines():
-        leading = len(line) - len(line.lstrip())
-        prefix = line[:leading]
-        stripped = line.strip()
+
+    alias_to_section: Dict[str, str] = {}
+    for section, aliases in section_aliases.items():
+        for alias in aliases:
+            alias_to_section[alias] = section
+
+    buckets: Dict[str, List[str]] = {"场景": [], "可疑线索": [], "可执行行动": []}
+    current_section = "场景"
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
 
         matched = False
-        for raw_term, normalized_term in aliases.items():
+        for alias, section in alias_to_section.items():
             pattern = (
                 rf"^([>#\-\s]*)"
-                rf"\*{{0,2}}[\[【(（]?{re.escape(raw_term)}[\]】)）]?\*{{0,2}}"
+                rf"\*{{0,2}}[\[【(（]?\s*{re.escape(alias)}\s*[\]】)）]?\*{{0,2}}"
                 rf"([：:]?)(.*)$"
             )
             m = re.match(pattern, stripped)
             if not m:
                 continue
-            prefix_mark = m.group(1) or ""
-            punct = m.group(2) or ""
-            tail = m.group(3) or ""
-            out_lines.append(f"{prefix}{prefix_mark}**[ {normalized_term} ]**{punct}{tail}")
+            current_section = section
+            tail = (m.group(3) or "").strip()
+            if tail:
+                buckets[current_section].append(tail)
             matched = True
             break
 
-        if not matched:
-            out_lines.append(line)
+        if matched:
+            continue
 
-    return "\n".join(out_lines)
+        normalized_line = stripped
+        if current_section == "可执行行动":
+            circled_map = {
+                "①": "1.",
+                "②": "2. ",
+                "③": "3. ",
+                "④": "4. ",
+                "⑤": "5. ",
+                "⑥": "6. ",
+            }
+            for circled, numbered in circled_map.items():
+                if normalized_line.startswith(circled):
+                    normalized_line = numbered + normalized_line[1:].strip()
+                    break
+        buckets[current_section].append(normalized_line)
+
+    if not buckets["场景"]:
+        buckets["场景"] = ["现场暂无新增描述。"]
+    if not buckets["可疑线索"]:
+        buckets["可疑线索"] = ["暂未发现新增可疑线索。"]
+    if not buckets["可执行行动"]:
+        buckets["可执行行动"] = ["1. 继续调查现场细节", "2. 追问关键相关人", "3. 核验已得线索"]
+
+    output_lines: List[str] = []
+    for section in ["场景", "可疑线索", "可执行行动"]:
+        output_lines.append(f"**{section}**")
+        output_lines.extend(buckets[section])
+        output_lines.append("")
+
+    return "\n".join(output_lines).strip()
 
 
 def start_new_game(mode: str) -> Tuple[List[ChatMessage], List[Tuple[str, str]], str, int, bool]:

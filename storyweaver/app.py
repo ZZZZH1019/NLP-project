@@ -57,7 +57,7 @@ def _format_key_section_titles(text: str) -> str:
             prefix_mark = m.group(1) or ""
             punct = m.group(2) or ""
             tail = m.group(3) or ""
-            out_lines.append(f"{prefix}{prefix_mark}**{normalized_term}**{punct}{tail}")
+            out_lines.append(f"{prefix}{prefix_mark}**[ {normalized_term} ]**{punct}{tail}")
             matched = True
             break
 
@@ -78,7 +78,7 @@ def start_new_game(mode: str) -> Tuple[List[ChatMessage], List[Tuple[str, str]],
     - turn_count: 当前回合数
     - is_game_over: 是否已结案
     """
-    opening = _remove_blank_lines(generator.opening_scene())
+    opening = generator.opening_scene().strip()
     chat_display: List[ChatMessage] = [
         {"role": "assistant", "content": opening}
     ]
@@ -282,7 +282,7 @@ def build_interface() -> gr.Blocks:
         #story-panel .message .prose * {
             margin-top: 0 !important;
             margin-bottom: 0 !important;
-            line-height: 1.35 !important;
+            line-height: 1.5 !important;
         }
         #story-panel .message .prose ol,
         #story-panel .message .prose ul {

@@ -180,30 +180,51 @@ def build_interface() -> gr.Blocks:
         #header-row { align-items: flex-start; }
         #mode-panel { padding-top: 6px; }
         #mode-panel .label-wrap,
-        #story-panel .label-wrap,
         #status-box .label-wrap,
         #action-input .label-wrap {
             min-height: 28px;
         }
         #mode-panel .label-wrap .label-text,
-        #story-panel .label-wrap .label-text,
         #status-box .label-wrap .label-text,
         #action-input .label-wrap .label-text {
             font-size: 14px;
             line-height: 1.4;
             font-weight: 600;
         }
-        #layout-root { height: calc(100vh - 240px); }
+        #layout-root {
+            height: calc(100vh - 240px);
+            min-height: 0;
+        }
+        #left-panel {
+            height: calc(100vh - 240px);
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            gap: 0;
+        }
+        #story-label {
+            height: 32px;
+            line-height: 32px;
+            font-size: 16px;
+            font-weight: 700;
+            margin: 0;
+            padding: 0 8px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #e5e5e5;
+        }
         #story-panel {
-            height: calc(100vh - 240px) !important;
-            min-height: calc(100vh - 240px) !important;
-            max-height: calc(100vh - 240px) !important;
+            flex: 1 1 auto;
+            min-height: 0;
             overflow: hidden !important;
         }
+        #story-panel .label-wrap {
+            display: none !important;
+        }
         #story-panel .wrap {
-            height: calc(100vh - 240px) !important;
-            min-height: calc(100vh - 240px) !important;
-            max-height: calc(100vh - 240px) !important;
+            height: 100% !important;
+            min-height: 0 !important;
+            max-height: 100% !important;
             overflow: hidden !important;
         }
         #story-panel .overflow-y-auto {
@@ -306,9 +327,11 @@ def build_interface() -> gr.Blocks:
                 )
 
         with gr.Row(equal_height=True, elem_id="layout-root"):
-            with gr.Column(scale=7):
+            with gr.Column(scale=7, elem_id="left-panel"):
+                gr.HTML('<div id="story-label">📖 剧情内容</div>')
                 chatbot = gr.Chatbot(
-                    label="剧情内容",
+                    label=None,
+                    show_label=False,
                     elem_id="story-panel",
                     render_markdown=True,
                 )

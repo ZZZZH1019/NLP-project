@@ -120,11 +120,15 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
     )
     list_style = "margin:0;padding:0;display:flex;flex-direction:column;gap:8px;"
     auto_scroll_script = (
-        "<script>(function(){"
+        "<img src='x' alt='' style='display:none' onerror=\"(function(){"
         "const el=document.getElementById('story-scroll');"
         "if(!el){return;}"
-        "requestAnimationFrame(()=>{el.scrollTop=el.scrollHeight;});"
-        "})();</script>"
+        "const jump=function(){el.scrollTop=el.scrollHeight;};"
+        "jump();"
+        "requestAnimationFrame(jump);"
+        "setTimeout(jump,60);"
+        "setTimeout(jump,180);"
+        "})();this.onerror=null;this.remove();\">"
     )
     typing_style = (
         "<style>"

@@ -151,8 +151,8 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
     for msg in messages:
         role = msg.get("role", "assistant")
         row_justify = "flex-end" if role == "user" else "flex-start"
-        bubble_bg = "#ecfeff" if role == "user" else "#ffffff"
-        bubble_border = "#a5f3fc" if role == "user" else "#dbeafe"
+        bubble_bg = "#f1f5f9" if role == "user" else "#ffffff"
+        bubble_border = "#cbd5e1" if role == "user" else "#dbeafe"
         is_pending = bool(msg.get("pending", False))
         content = msg.get("content", "") or ""
         if is_pending:

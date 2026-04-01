@@ -13,6 +13,7 @@ python app.py
 from __future__ import annotations
 
 import re
+import html
 from typing import Dict, List, Tuple
 import gradio as gr
 
@@ -30,49 +31,51 @@ def _remove_blank_lines(text: str) -> str:
     return "\n".join(lines)
 
 
-def _format_key_section_titles(text: str) -> str:
-    """将回复归一为三段结构：【场景】【可疑线索】【可执行行动】，标准化格式和编号。"""
-    section_aliases = {
-        "场景": ["场景", "当前场景", "现场", "情景", "行动结果", "结果反馈"],
-        "可疑线索": ["可疑线索", "线索", "关键线索", "证据", "新线索", "技术鉴定失败"],
-        "可执行行动": ["可执行行动", "可执行运动", "行动建议", "行动选项", "建议行动", "下一步行动"],
-    }
+SECTION_ORDER = ["场景", "可疑线索", "可执行行动"]
+SECTION_ALIASES: Dict[str, List[str]] = {
+    "场景": ["场景", "当前场景", "现场", "情景", "行动结果", "结果反馈"],
+    "可疑线索": ["可疑线索", "线索", "关键线索", "证据", "新线索", "技术鉴定失败"],
+    "可执行行动": ["可执行行动", "可执行运动", "行动建议", "行动选项", "建议行动", "下一步行动"],
+}
 
-    alias_to_section: Dict[str, str] = {}
-    for section, aliases in section_aliases.items():
+
+def _strip_prefix_index(line: str) -> str:
+    """移除模型可能输出的前缀编号，避免重复编号。"""
+    return re.sub(r"^[a-zA-Z0-9①-⑩\-\.\)\））、:：\s]+", "", line).strip()
+
+
+def _detect_section(line: str) -> Tuple[str | None, str]:
+    """识别当前行是否为小节标题，并返回规范小节名与同行尾部内容。"""
+    stripped = line.strip()
+    for canonical, aliases in SECTION_ALIASES.items():
         for alias in aliases:
-            alias_to_section[alias] = section
+            matched = re.match(
+                rf"^([>#\-\s]*)\*{{0,2}}[\[【(（]?\s*{re.escape(alias)}\s*[\]】)）]?\*{{0,2}}([：:]?)(.*)$",
+                stripped,
+            )
+            if matched:
+                tail = (matched.group(3) or "").strip()
+                return canonical, tail
+    return None, stripped
 
-    buckets: Dict[str, List[str]] = {"场景": [], "可疑线索": [], "可执行行动": []}
+
+def _normalize_message_blocks(text: str) -> str:
+    """将回复归一为三段结构：【场景】【可疑线索】【可执行行动】并统一大写编号。"""
+    buckets: Dict[str, List[str]] = {section: [] for section in SECTION_ORDER}
     current_section = "场景"
 
     for raw_line in text.splitlines():
-        stripped = raw_line.strip()
-        if not stripped:
+        if not raw_line.strip():
             continue
 
-        matched = False
-        for alias, section in alias_to_section.items():
-            pattern = (
-                rf"^([>#\-\s]*)"
-                rf"\*{{0,2}}[\[【(（]?\s*{re.escape(alias)}\s*[\]】)）]?\*{{0,2}}"
-                rf"([：:]?)(.*)$"
-            )
-            m = re.match(pattern, stripped)
-            if not m:
-                continue
+        section, tail = _detect_section(raw_line)
+        if section:
             current_section = section
-            tail = (m.group(3) or "").strip()
             if tail:
                 buckets[current_section].append(tail)
-            matched = True
-            break
-
-        if matched:
             continue
 
-        normalized_line = stripped
-        buckets[current_section].append(normalized_line)
+        buckets[current_section].append(raw_line.strip())
 
     if not buckets["场景"]:
         buckets["场景"] = ["现场暂无新增描述。"]
@@ -81,33 +84,72 @@ def _format_key_section_titles(text: str) -> str:
     if not buckets["可执行行动"]:
         buckets["可执行行动"] = ["继续调查现场细节", "追问关键相关人", "核验已得线索"]
 
-    # 处理可疑线索编号（多条时按abc，单条时不加编号）
-    if len(buckets["可疑线索"]) > 1:
-        formatted_clues: List[str] = []
-        for i, clue in enumerate(buckets["可疑线索"]):
-            cleaned = re.sub(r"^[a-zA-Z0-9①-⑥\-\.\)\））、:：\s]+", "", clue).strip()
-            if cleaned:
-                letter = chr(ord("a") + i) if i < 26 else f"a{i + 1}"
-                formatted_clues.append(f"{letter}. {cleaned}")
-        buckets["可疑线索"] = formatted_clues if formatted_clues else buckets["可疑线索"]
+    clues = [_strip_prefix_index(item) for item in buckets["可疑线索"] if _strip_prefix_index(item)]
+    if len(clues) > 1:
+        buckets["可疑线索"] = [f"{chr(ord('A') + i)}. {item}" for i, item in enumerate(clues)]
+    elif len(clues) == 1:
+        buckets["可疑线索"] = clues
+    else:
+        buckets["可疑线索"] = ["暂未发现新增可疑线索。"]
 
-    # 处理可执行行动编号（按abc）
-    formatted_actions: List[str] = []
-    for i, action in enumerate(buckets["可执行行动"]):
-        cleaned = re.sub(r"^[a-zA-Z0-9①-⑥\-\.\)\））、:：\s]+", "", action).strip()
-        if cleaned:
-            letter = chr(ord("a") + i) if i < 26 else f"a{i + 1}"
-            formatted_actions.append(f"{letter}. {cleaned}")
-    buckets["可执行行动"] = formatted_actions if formatted_actions else buckets["可执行行动"]
+    actions = [_strip_prefix_index(item) for item in buckets["可执行行动"] if _strip_prefix_index(item)]
+    if actions:
+        buckets["可执行行动"] = [f"{chr(ord('A') + i)}. {item}" for i, item in enumerate(actions)]
+    else:
+        buckets["可执行行动"] = ["A. 继续调查现场细节", "B. 追问关键相关人", "C. 核验已得线索"]
 
     output_lines: List[str] = []
-    for section in ["场景", "可疑线索", "可执行行动"]:
+    for section in SECTION_ORDER:
         output_lines.append(f"**[ {section} ]**")
         output_lines.append("")
         output_lines.extend(buckets[section])
         output_lines.append("")
 
     return "\n".join(output_lines).strip()
+
+
+def render_chat_html(messages: List[ChatMessage]) -> str:
+    """将消息状态渲染为纯 HTML，避免 Chatbot 默认样式导致的额外空白。"""
+    shell_style = (
+        "min-height:320px;max-height:calc(100vh - 320px);border:1px solid #e5e7eb;border-top:none;"
+        "border-radius:0 0 10px 10px;background:#fcfdff;overflow:hidden;"
+    )
+    scroll_style = (
+        "min-height:320px;max-height:calc(100vh - 320px);overflow-y:auto;overflow-x:hidden;padding:10px 12px;"
+        "box-sizing:border-box;"
+    )
+    list_style = "margin:0;padding:0;display:flex;flex-direction:column;gap:8px;"
+
+    if not messages:
+        return (
+            f'<div id="story-shell" style="{shell_style}"><div id="story-scroll" style="{scroll_style}"><div id="story-list" style="{list_style}">'
+            '<div class="story-empty" style="color:#6b7280;font-size:14px;line-height:1.5;padding:8px 10px;">剧情已加载，等待案件开场...</div>'
+            '</div></div></div>'
+        )
+
+    parts: List[str] = []
+    for msg in messages:
+        role = msg.get("role", "assistant")
+        row_justify = "flex-end" if role == "user" else "flex-start"
+        role_title = "你" if role == "user" else "案件引擎"
+        bubble_bg = "#ecfeff" if role == "user" else "#ffffff"
+        bubble_border = "#a5f3fc" if role == "user" else "#dbeafe"
+        content = msg.get("content", "") or ""
+        safe = html.escape(content).replace("\n", "<br>")
+        parts.append(
+            f'<div class="story-row" style="display:flex;justify-content:{row_justify};margin:0;">'
+            f'<div class="story-bubble" style="max-width:90%;margin:0;padding:10px 12px;border-radius:12px;border:1px solid {bubble_border};background:{bubble_bg};box-sizing:border-box;">'
+            f'<div class="story-role" style="margin:0 0 4px 0;font-size:12px;color:#475569;font-weight:700;">{role_title}</div>'
+            f'<div class="story-content" style="margin:0;padding:0;word-break:break-word;line-height:1.5;font-size:14px;color:#0f172a;">{safe}</div>'
+            "</div>"
+            "</div>"
+        )
+
+    return (
+        f'<div id="story-shell" style="{shell_style}"><div id="story-scroll" style="{scroll_style}"><div id="story-list" style="{list_style}">'
+        + "".join(parts)
+        + "</div></div></div>"
+    )
 
 
 def start_new_game(mode: str) -> Tuple[List[ChatMessage], List[Tuple[str, str]], str, int, bool]:
@@ -186,7 +228,7 @@ def submit_action(
             max_turns=MAX_NARRATIVE_TURNS,
         )
         ai_reply = _remove_blank_lines(ai_reply)
-        ai_reply = _format_key_section_titles(ai_reply)
+        ai_reply = _normalize_message_blocks(ai_reply)
     except Exception as exc:  # noqa: BLE001
         ai_reply = (
             "系统提示：当前无法连接剧情引擎，请检查 API Key、网络或配额后重试。\n"
@@ -213,6 +255,34 @@ def submit_action(
         status = f"自由模式：第 {next_turn} 回合，剧情已更新。"
 
     return chat_display, game_history, status, "", next_turn, finished
+
+
+def start_new_game_ui(mode: str) -> Tuple[str, List[ChatMessage], List[Tuple[str, str]], str, int, bool]:
+    """开局并同步返回剧情区 HTML。"""
+    chat_display, game_history, status, turn_count, is_game_over = start_new_game(mode)
+    story_html = render_chat_html(chat_display)
+    return story_html, chat_display, game_history, status, turn_count, is_game_over
+
+
+def submit_action_ui(
+    user_input: str,
+    chat_display: List[ChatMessage],
+    game_history: List[Tuple[str, str]],
+    mode: str,
+    turn_count: int,
+    is_game_over: bool,
+) -> Tuple[str, List[ChatMessage], List[Tuple[str, str]], str, str, int, bool]:
+    """提交行动并同步返回剧情区 HTML。"""
+    next_chat, next_history, status, cleared_input, next_turn, finished = submit_action(
+        user_input=user_input,
+        chat_display=chat_display,
+        game_history=game_history,
+        mode=mode,
+        turn_count=turn_count,
+        is_game_over=is_game_over,
+    )
+    story_html = render_chat_html(next_chat)
+    return story_html, next_chat, next_history, status, cleared_input, next_turn, finished
 
 
 def build_interface() -> gr.Blocks:
@@ -258,82 +328,84 @@ def build_interface() -> gr.Blocks:
         }
         #story-panel {
             flex: 1 1 auto;
+            min-height: 320px;
+            display: block;
+        }
+        #story-panel .html-container {
+            min-height: 320px;
+            padding: 0;
+            margin: 0;
+        }
+        #story-shell {
+            height: 100%;
             min-height: 0;
-            overflow: hidden !important;
+            border: 1px solid #e5e7eb;
+            border-top: none;
+            border-radius: 0 0 10px 10px;
+            background: #fcfdff;
+            overflow: hidden;
         }
-        #story-panel button[aria-label="Share"],
-        #story-panel button[aria-label="Copy"],
-        #story-panel button[aria-label="Copy all"],
-        #story-panel button[aria-label="Delete"],
-        #story-panel button[aria-label="Clear"],
-        #story-panel button[aria-label="分享"],
-        #story-panel button[aria-label="复制"],
-        #story-panel button[aria-label="复制全部"],
-        #story-panel button[aria-label="删除"],
-        #story-panel button[aria-label="清空"],
-        #story-panel button[title="Share"],
-        #story-panel button[title="Copy"],
-        #story-panel button[title="Copy all"],
-        #story-panel button[title="Delete"],
-        #story-panel button[title="Clear"],
-        #story-panel button[title="分享"],
-        #story-panel button[title="复制"],
-        #story-panel button[title="复制全部"],
-        #story-panel button[title="删除"],
-        #story-panel button[title="清空"],
-        #story-panel .icon-buttons,
-        #story-panel .button-row,
-        #story-panel .button-panel,
-        #story-panel .chatbot-buttons {
-            display: none !important;
+        #story-scroll {
+            height: 100%;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 10px 12px;
+            box-sizing: border-box;
         }
-        #story-panel .label-wrap {
-            display: none !important;
+        #story-list {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
-        #story-panel > header,
-        #story-panel .panel-header,
-        #story-panel .head,
-        #story-panel .toolbar,
-        #story-panel .top-panel {
-            display: none !important;
+        .story-empty {
+            color: #6b7280;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 8px 10px;
         }
-        #story-panel .wrap {
-            height: 100% !important;
-            min-height: 0 !important;
-            max-height: 100% !important;
-            overflow: hidden !important;
+        .story-row {
+            display: flex;
+            margin: 0;
         }
-        #story-panel .overflow-y-auto {
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            overscroll-behavior: contain;
+        .story-assistant {
+            justify-content: flex-start;
         }
-        #story-panel pre,
-        #story-panel code,
-        #story-panel .message {
-            white-space: pre-wrap !important;
-            word-break: break-word !important;
+        .story-user {
+            justify-content: flex-end;
         }
-        #story-panel .message p,
-        #story-panel .message ul,
-        #story-panel .message ol,
-        #story-panel .message li {
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
+        .story-bubble {
+            max-width: 90%;
+            margin: 0;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            box-sizing: border-box;
         }
-        #story-panel .message .prose,
-        #story-panel .message .prose * {
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
-            line-height: 1.5 !important;
+        .story-assistant .story-bubble {
+            background: #ffffff;
+            border-color: #dbeafe;
         }
-        #story-panel .message .prose ol,
-        #story-panel .message .prose ul {
-            padding-left: 1.1em !important;
+        .story-user .story-bubble {
+            background: #ecfeff;
+            border-color: #a5f3fc;
         }
-        #story-panel .message strong {
-            color: #111111;
+        .story-role {
+            margin: 0 0 4px 0;
+            font-size: 12px;
+            color: #475569;
             font-weight: 700;
+        }
+        .story-content {
+            margin: 0;
+            padding: 0;
+            white-space: normal;
+            word-break: break-word;
+            line-height: 1.5;
+            font-size: 14px;
+            color: #0f172a;
         }
         #right-panel {
             display: flex;
@@ -405,13 +477,10 @@ def build_interface() -> gr.Blocks:
         with gr.Row(equal_height=True, elem_id="layout-root"):
             with gr.Column(scale=7, elem_id="left-panel"):
                 gr.HTML('<div id="story-label">📖 剧情内容</div>')
-                chatbot = gr.Chatbot(
-                    label=None,
-                    show_label=False,
-                    container=False,
-                    buttons=[],
+                story_panel = gr.HTML(
+                    value=render_chat_html([]),
                     elem_id="story-panel",
-                    render_markdown=True,
+                    container=False,
                 )
 
             with gr.Column(scale=5, elem_id="right-panel"):
@@ -442,53 +511,33 @@ def build_interface() -> gr.Blocks:
 
         # 页面加载时自动开局。
         demo.load(
-            fn=start_new_game,
+            fn=start_new_game_ui,
             inputs=[mode_selector],
-            outputs=[chatbot, game_state, status, turn_state, game_over_state],
-        ).then(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chat_state],
+            outputs=[story_panel, chat_state, game_state, status, turn_state, game_over_state],
         )
 
         mode_selector.change(
-            fn=start_new_game,
+            fn=start_new_game_ui,
             inputs=[mode_selector],
-            outputs=[chatbot, game_state, status, turn_state, game_over_state],
-        ).then(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chat_state],
+            outputs=[story_panel, chat_state, game_state, status, turn_state, game_over_state],
         )
 
         send_btn.click(
-            fn=submit_action,
+            fn=submit_action_ui,
             inputs=[user_input, chat_state, game_state, mode_selector, turn_state, game_over_state],
-            outputs=[chatbot, game_state, status, user_input, turn_state, game_over_state],
-        ).then(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chat_state],
+            outputs=[story_panel, chat_state, game_state, status, user_input, turn_state, game_over_state],
         )
 
         user_input.submit(
-            fn=submit_action,
+            fn=submit_action_ui,
             inputs=[user_input, chat_state, game_state, mode_selector, turn_state, game_over_state],
-            outputs=[chatbot, game_state, status, user_input, turn_state, game_over_state],
-        ).then(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chat_state],
+            outputs=[story_panel, chat_state, game_state, status, user_input, turn_state, game_over_state],
         )
 
         restart_btn.click(
-            fn=start_new_game,
+            fn=start_new_game_ui,
             inputs=[mode_selector],
-            outputs=[chatbot, game_state, status, turn_state, game_over_state],
-        ).then(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chat_state],
+            outputs=[story_panel, chat_state, game_state, status, turn_state, game_over_state],
         )
 
     return demo

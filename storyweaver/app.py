@@ -131,7 +131,6 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
     for msg in messages:
         role = msg.get("role", "assistant")
         row_justify = "flex-end" if role == "user" else "flex-start"
-        role_title = "你" if role == "user" else "案件引擎"
         bubble_bg = "#ecfeff" if role == "user" else "#ffffff"
         bubble_border = "#a5f3fc" if role == "user" else "#dbeafe"
         content = msg.get("content", "") or ""
@@ -142,7 +141,6 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
         parts.append(
             f'<div class="story-row" style="display:flex;justify-content:{row_justify};margin:0;">'
             f'<div class="story-bubble" style="max-width:90%;margin:0;padding:10px 12px;border-radius:12px;border:1px solid {bubble_border};background:{bubble_bg};box-sizing:border-box;">'
-            f'<div class="story-role" style="margin:0 0 4px 0;font-size:12px;color:#475569;font-weight:700;">{role_title}</div>'
             f'<div class="story-content" style="margin:0;padding:0;word-break:break-word;line-height:1.5;font-size:14px;color:#0f172a;">{safe}</div>'
             "</div>"
             "</div>"

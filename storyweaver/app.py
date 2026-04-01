@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import re
 import html
-from typing import Dict, List, Tuple
+from typing import Dict, Generator, List, Tuple
 import gradio as gr
 
 from story_generator import StoryGenerator
 
 
 generator = StoryGenerator()
-ChatMessage = Dict[str, str]
+ChatMessage = Dict[str, object]
 MAX_NARRATIVE_TURNS = 20
 
 
@@ -119,12 +119,28 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
         "box-sizing:border-box;"
     )
     list_style = "margin:0;padding:0;display:flex;flex-direction:column;gap:8px;"
+    auto_scroll_script = (
+        "<script>(function(){"
+        "const el=document.getElementById('story-scroll');"
+        "if(!el){return;}"
+        "requestAnimationFrame(()=>{el.scrollTop=el.scrollHeight;});"
+        "})();</script>"
+    )
+    typing_style = (
+        "<style>"
+        "@keyframes storyTypingBlink{0%,80%,100%{opacity:.25;}40%{opacity:1;}}"
+        ".story-typing{display:inline-flex;align-items:center;gap:4px;height:16px;}"
+        ".story-typing-dot{width:6px;height:6px;border-radius:50%;background:#64748b;display:inline-block;animation:storyTypingBlink 1.2s infinite;}"
+        ".story-typing-dot:nth-child(2){animation-delay:.2s;}"
+        ".story-typing-dot:nth-child(3){animation-delay:.4s;}"
+        "</style>"
+    )
 
     if not messages:
         return (
             f'<div id="story-shell" style="{shell_style}"><div id="story-scroll" style="{scroll_style}"><div id="story-list" style="{list_style}">'
             '<div class="story-empty" style="color:#6b7280;font-size:14px;line-height:1.5;padding:8px 10px;">剧情已加载，等待案件开场...</div>'
-            '</div></div></div>'
+            f'</div></div></div>{auto_scroll_script}'
         )
 
     parts: List[str] = []
@@ -133,11 +149,21 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
         row_justify = "flex-end" if role == "user" else "flex-start"
         bubble_bg = "#ecfeff" if role == "user" else "#ffffff"
         bubble_border = "#a5f3fc" if role == "user" else "#dbeafe"
+        is_pending = bool(msg.get("pending", False))
         content = msg.get("content", "") or ""
-        safe = html.escape(content)
-        # 仅启用最小 Markdown：**加粗**，其余仍按纯文本处理。
-        safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
-        safe = safe.replace("\n", "<br>")
+        if is_pending:
+            safe = (
+                '<span class="story-typing">'
+                '<span class="story-typing-dot"></span>'
+                '<span class="story-typing-dot"></span>'
+                '<span class="story-typing-dot"></span>'
+                "</span>"
+            )
+        else:
+            safe = html.escape(str(content))
+            # 仅启用最小 Markdown：**加粗**，其余仍按纯文本处理。
+            safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
+            safe = safe.replace("\n", "<br>")
         parts.append(
             f'<div class="story-row" style="display:flex;justify-content:{row_justify};margin:0;">'
             f'<div class="story-bubble" style="max-width:90%;margin:0;padding:10px 12px;border-radius:12px;border:1px solid {bubble_border};background:{bubble_bg};box-sizing:border-box;">'
@@ -147,9 +173,10 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
         )
 
     return (
-        f'<div id="story-shell" style="{shell_style}"><div id="story-scroll" style="{scroll_style}"><div id="story-list" style="{list_style}">'
+        typing_style
+        + f'<div id="story-shell" style="{shell_style}"><div id="story-scroll" style="{scroll_style}"><div id="story-list" style="{list_style}">'
         + "".join(parts)
-        + "</div></div></div>"
+        + f"</div></div></div>{auto_scroll_script}"
     )
 
 
@@ -284,6 +311,97 @@ def submit_action_ui(
     )
     story_html = render_chat_html(next_chat)
     return story_html, next_chat, next_history, status, cleared_input, next_turn, finished
+
+
+def submit_action_stream(
+    user_input: str,
+    chat_display: List[ChatMessage],
+    game_history: List[Tuple[str, str]],
+    mode: str,
+    turn_count: int,
+    is_game_over: bool,
+) -> Generator[Tuple[str, List[ChatMessage], List[Tuple[str, str]], str, str, int, bool], None, None]:
+    """先回显用户输入与AI占位气泡，再在生成完成后替换为真实回复。"""
+    user_text = (user_input or "").strip()
+    if not user_text:
+        yield render_chat_html(chat_display), chat_display, game_history, "请输入你的行动或推理。", "", turn_count, is_game_over
+        return
+
+    if len(user_text) > 100:
+        yield (
+            render_chat_html(chat_display),
+            chat_display,
+            game_history,
+            "输入超出 100 字，请精简后再提交。",
+            user_text[:100],
+            turn_count,
+            is_game_over,
+        )
+        return
+
+    if mode == "叙事模式" and is_game_over:
+        yield (
+            render_chat_html(chat_display),
+            chat_display,
+            game_history,
+            "本案已结案，请点击“重新开始”开启新案件。",
+            "",
+            turn_count,
+            is_game_over,
+        )
+        return
+
+    next_turn = turn_count + 1
+    pending_chat = chat_display + [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": "", "pending": True},
+    ]
+
+    # 第一阶段：立即回显用户输入，并显示 AI 加载占位气泡。
+    yield (
+        render_chat_html(pending_chat),
+        pending_chat,
+        game_history,
+        "AI 正在分析线索...",
+        "",
+        turn_count,
+        is_game_over,
+    )
+
+    try:
+        ai_reply = generator.generate_next_with_control(
+            player_input=user_text,
+            history=game_history,
+            mode=mode,
+            turn=next_turn,
+            max_turns=MAX_NARRATIVE_TURNS,
+        )
+        ai_reply = _remove_blank_lines(ai_reply)
+        ai_reply = _normalize_message_blocks(ai_reply)
+    except Exception as exc:  # noqa: BLE001
+        ai_reply = (
+            "系统提示：当前无法连接剧情引擎，请检查 API Key、网络或配额后重试。\n"
+            f"错误信息：{exc}"
+        )
+
+    final_chat = chat_display + [
+        {"role": "user", "content": user_text},
+        {"role": "assistant", "content": ai_reply},
+    ]
+    final_history = game_history + [(user_text, ai_reply)]
+
+    if mode == "叙事模式":
+        finished = next_turn >= MAX_NARRATIVE_TURNS
+        if finished:
+            status = f"叙事模式：{next_turn}/{MAX_NARRATIVE_TURNS} 回合，真相已揭示，案件已结案。"
+        else:
+            status = f"叙事模式：{next_turn}/{MAX_NARRATIVE_TURNS} 回合，剧情推进中。"
+    else:
+        finished = False
+        status = f"自由模式：第 {next_turn} 回合，剧情已更新。"
+
+    # 第二阶段：替换占位气泡为真实回复，并滚动到最新消息。
+    yield render_chat_html(final_chat), final_chat, final_history, status, "", next_turn, finished
 
 
 def build_interface() -> gr.Blocks:
@@ -528,15 +646,17 @@ def build_interface() -> gr.Blocks:
         )
 
         send_btn.click(
-            fn=submit_action_ui,
+            fn=submit_action_stream,
             inputs=[user_input, chat_state, game_state, mode_selector, turn_state, game_over_state],
             outputs=[story_panel, chat_state, game_state, status, user_input, turn_state, game_over_state],
+            show_progress="hidden",
         )
 
         user_input.submit(
-            fn=submit_action_ui,
+            fn=submit_action_stream,
             inputs=[user_input, chat_state, game_state, mode_selector, turn_state, game_over_state],
             outputs=[story_panel, chat_state, game_state, status, user_input, turn_state, game_over_state],
+            show_progress="hidden",
         )
 
         restart_btn.click(

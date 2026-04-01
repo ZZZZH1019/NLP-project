@@ -135,7 +135,10 @@ def render_chat_html(messages: List[ChatMessage]) -> str:
         bubble_bg = "#ecfeff" if role == "user" else "#ffffff"
         bubble_border = "#a5f3fc" if role == "user" else "#dbeafe"
         content = msg.get("content", "") or ""
-        safe = html.escape(content).replace("\n", "<br>")
+        safe = html.escape(content)
+        # 仅启用最小 Markdown：**加粗**，其余仍按纯文本处理。
+        safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
+        safe = safe.replace("\n", "<br>")
         parts.append(
             f'<div class="story-row" style="display:flex;justify-content:{row_justify};margin:0;">'
             f'<div class="story-bubble" style="max-width:90%;margin:0;padding:10px 12px;border-radius:12px;border:1px solid {bubble_border};background:{bubble_bg};box-sizing:border-box;">'
@@ -406,6 +409,10 @@ def build_interface() -> gr.Blocks:
             line-height: 1.5;
             font-size: 14px;
             color: #0f172a;
+        }
+        .story-content strong {
+            font-weight: 700;
+            color: #111827;
         }
         #right-panel {
             display: flex;
